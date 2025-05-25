@@ -1,13 +1,22 @@
 esphome:
   name: ld2410c
   friendly_name: LD2410c
+  on_boot:
+    priority: -100  # Выполняется после инициализации компонентов
+    then:
+      - text_sensor.template.publish:
+          id: device_diagnostics
+          state: !lambda 'return "Вентилятор: " + id(fan_address_var) + ", Выключатель: " + id(switch_address_var);'
+      - logger.log:
+          format: "Диагностика при старте: Вентилятор: %s, Switch: %s"
+          args: ['id(fan_address_var).c_str()', 'id(switch_address_var).c_str()']
 
 esp32:
   board: esp32dev
   framework:
     type: arduino
 
-# Глобальные переменные для настроек
+# Глобальные переменные для настроек (зашиты в прошивку)
 globals:
   - id: fan_address_var
     type: std::string
@@ -31,18 +40,24 @@ text_sensor:
       } else {
         return {"Выключено"};
       }
-    update_interval: 5s
-  # Отображение текущих настроек (только для чтения)
+    update_interval: never
+  # Статус MQTT с параметрами из конфигурации
   - platform: template
-    name: "Адрес вентилятора"
-    id: fan_address_display
-    lambda: 'return id(fan_address_var);'
-    update_interval: 10s
+    name: "Статус MQTT"
+    id: mqtt_status
+    lambda: |-
+      if (id(mqtt_client).is_connected()) {
+        return {"Подключен к MQTT"};
+      } else {
+        return {"Отключен от MQTT"};
+      }
+    update_interval: never
+  # Диагностика устройства
   - platform: template
-    name: "Адрес выключателя"
-    id: switch_address_display
-    lambda: 'return id(switch_address_var);'
-    update_interval: 10s
+    name: "Диагностика устройства"
+    id: device_diagnostics
+    lambda: !lambda 'return "Вентилятор: " + id(fan_address_var) + ", Выключатель: " + id(switch_address_var);'
+    update_interval: never
 
 select:
   - platform: ld2410
@@ -58,8 +73,9 @@ select:
 ld2410:
   id: ld2410_radar
 
-# MQTT конфигурация со статическими параметрами
+# MQTT конфигурация
 mqtt:
+  id: mqtt_client
   broker: "192.168.0.118"
   port: 1883
   username: "user"
@@ -68,15 +84,30 @@ mqtt:
   discovery: true
   discovery_retain: false
   topic_prefix: esphome/ld2410c
+  on_connect:
+    then:
+      - text_sensor.template.publish:
+          id: mqtt_status
+          state: "Подключен к MQTT"
+      - logger.log: "MQTT подключен"
+  on_disconnect:
+    then:
+      - text_sensor.template.publish:
+          id: mqtt_status
+          state: "Отключен"
+      - logger.log: "MQTT отключен"
 
-# Enable logging с фильтрацией
+# Логирование
 logger:
-  level: INFO
+  level: DEBUG
   logs:
-    sensor: WARN  # Отключаем DEBUG сообщения от датчиков
+    sensor: WARN
     ld2410: INFO
+    api: DEBUG
+    text_sensor: DEBUG
+    mqtt: DEBUG
 
-# Enable Home Assistant API
+# Home Assistant API
 api:
   encryption:
     key: "KahQLtumxnvNxlSAXedfZm9cLfSdQ/Kg3v2XtEbqBdQ="
@@ -88,27 +119,6 @@ api:
         - bluetooth_password.set:
             id: ld2410_radar
             password: !lambda 'return password;'
-    # Действия для изменения настроек
-    - action: set_fan_address
-      variables:
-        address: string
-      then:
-        - globals.set:
-            id: fan_address_var
-            value: !lambda 'return address;'
-        - logger.log:
-            format: "Адрес вентилятора изменен на: %s"
-            args: ['address.c_str()']
-    - action: set_switch_address
-      variables:
-        address: string
-      then:
-        - globals.set:
-            id: switch_address_var
-            value: !lambda 'return address;'
-        - logger.log:
-            format: "Адрес выключателя изменен на: %s"
-            args: ['address.c_str()']
 
 ota:
   - platform: esphome
@@ -129,21 +139,29 @@ uart:
   parity: NONE
   stop_bits: 1
 
-# Переключатели (должны быть определены до использования в binary_sensor)
+# Переключатели
 switch:
   - platform: ld2410
     engineering_mode:
       name: "engineering mode"
     bluetooth:
       name: "control bluetooth"
-  # Переключатель автоматического управления освещением
   - platform: template
     name: "Автоуправление Освещение"
     id: auto_control
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
     icon: "mdi:lightbulb-auto"
-  # Переключатель автоматического управления вентилятором
+    turn_on_action:
+      - text_sensor.template.publish:
+          id: auto_status
+          state: "Включено"
+      - logger.log: "Статус автоуправления изменен на: Включено"
+    turn_off_action:
+      - text_sensor.template.publish:
+          id: auto_status
+          state: "Выключено"
+      - logger.log: "Статус автоуправления изменен на: Выключено"
   - platform: template
     name: "Автоуправление Вентилятор"
     id: auto_control_fan
@@ -159,7 +177,6 @@ button:
       name: "перезагрузить"
     query_params:
       name: query params
-  # Кнопка перезагрузки для применения настроек MQTT
   - platform: restart
     name: "Перезагрузка для MQTT"
     id: restart_for_mqtt
@@ -173,7 +190,6 @@ number:
       name: Макс. расстояние движения
     max_still_distance_gate:
       name: Макс. расстояние покоя
-  # Настройка задержки выключения
   - platform: template
     name: "Задержка выключения"
     id: turn_off_delay
@@ -183,7 +199,6 @@ number:
     initial_value: 30
     step: 5
     unit_of_measurement: "сек"
-  # Настройка задержки включения вентилятора
   - platform: template
     name: "Задержка включения вентилятора"
     id: fan_turn_on_delay
@@ -200,10 +215,9 @@ binary_sensor:
       name: Обнаружение цели
       id: radar_has_target
       filters:
-        - delayed_off: 2s  # Анти-дребезг
+        - delayed_off: 2s
       on_press:
         then:
-          # Управление освещением
           - if:
               condition:
                 and:
@@ -217,7 +231,6 @@ binary_sensor:
                 - logger.log: 
                     format: "Включено освещение %s - обнаружено присутствие"
                     args: ['id(switch_address_var).c_str()']
-          # Управление вентилятором
           - if:
               condition:
                 and:
@@ -229,7 +242,6 @@ binary_sensor:
                 - logger.log: "Запущен таймер включения вентилятора"
       on_release:
         then:
-          # Управление освещением
           - if:
               condition:
                 and:
@@ -238,7 +250,6 @@ binary_sensor:
               then:
                 - script.execute: delayed_turn_off
                 - logger.log: "Запущен таймер выключения освещения"
-          # Управление вентилятором
           - if:
               condition:
                 and:
@@ -273,9 +284,7 @@ sensor:
       name: Расстояние обнаружения
       id: radar_detection_distance
 
-# Скрипты управления
 script:
-  # Скрипт с задержкой выключения освещения
   - id: delayed_turn_off
     then:
       - delay: !lambda "return id(turn_off_delay).state * 1000;"
@@ -292,8 +301,6 @@ script:
             - logger.log: 
                 format: "Выключено освещение %s - нет присутствия"
                 args: ['id(switch_address_var).c_str()']
-  
-  # Скрипт с задержкой включения вентилятора
   - id: delayed_fan_turn_on
     then:
       - delay: !lambda "return id(fan_turn_on_delay).state * 1000;"
@@ -310,8 +317,6 @@ script:
             - logger.log: 
                 format: "Включен вентилятор %s - длительное присутствие"
                 args: ['id(fan_address_var).c_str()']
-  
-  # Скрипт с задержкой выключения вентилятора
   - id: delayed_fan_turn_off
     then:
       - delay: !lambda "return id(turn_off_delay).state * 1000;"
@@ -327,6 +332,6 @@ script:
                 payload: '{"state": "OFF"}'
             - logger.log: 
                 format: "Выключен вентилятор %s - нет присутствия"
-                args: ['id(fan_address_var).c_str()']
+                args: ['id(switch_address_var).c_str()']
 
 captive_portal:
