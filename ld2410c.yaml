@@ -1,63 +1,36 @@
 esphome:
-  name: ld2410c
-  friendly_name: LD2410c
+  name: ld2410van
+  friendly_name: LD2410van
   on_boot:
-    priority: -100  # Выполняется после инициализации компонентов
+    priority: -100
     then:
       - text_sensor.template.publish:
           id: device_diagnostics
-          state: !lambda 'return "Вентилятор: " + id(fan_address_var) + ", Выключатель: " + id(switch_address_var);'
+          state: !lambda 'return "Выключатель: " + id(switch_address_var);'
       - logger.log:
-          format: "Диагностика при старте: Вентилятор: %s, Switch: %s"
-          args: ['id(fan_address_var).c_str()', 'id(switch_address_var).c_str()']
+          format: "Диагностика при старте: Выключатель: %s"
+          args: ['id(switch_address_var).c_str()']
+
 
 esp32:
   board: esp32dev
   framework:
     type: arduino
 
-# Глобальные переменные для настроек (зашиты в прошивку)
 globals:
-  - id: fan_address_var
-    type: std::string
-    initial_value: '"0xa4c138f19388b52c"'
   - id: switch_address_var
     type: std::string
-    initial_value: '"Выключатель1/right"'
+    initial_value: '"Выключатель1/center"'
 
-text_sensor:
-  - platform: ld2410
-    version:
-      name: "firmware version"
-    mac_address:
-      name: "mac address"
-  - platform: template
-    name: "Статус автоуправления"
-    id: auto_status
-    lambda: |-
-      if (id(auto_control).state) {
-        return {"Включено"};
-      } else {
-        return {"Выключено"};
-      }
-    update_interval: never
-  # Статус MQTT с параметрами из конфигурации
-  - platform: template
-    name: "Статус MQTT"
-    id: mqtt_status
-    lambda: |-
-      if (id(mqtt_client).is_connected()) {
-        return {"Подключен к MQTT"};
-      } else {
-        return {"Отключен от MQTT"};
-      }
-    update_interval: never
-  # Диагностика устройства
-  - platform: template
-    name: "Диагностика устройства"
-    id: device_diagnostics
-    lambda: !lambda 'return "Вентилятор: " + id(fan_address_var) + ", Выключатель: " + id(switch_address_var);'
-    update_interval: never
+
+logger:
+  level: DEBUG
+  logs:
+    sensor: WARN
+    ld2410: INFO
+    api: DEBUG
+    text_sensor: DEBUG
+    mqtt: DEBUG
 
 select:
   - platform: ld2410
@@ -70,20 +43,55 @@ select:
     out_pin_level:
       name: out pin level
 
+text_sensor:
+  - platform: ld2410
+    version:
+      name: "LD2410van Firmware Version"
+    mac_address:
+      name: "LD2410van MAC Address"
+  - platform: template
+    name: "LD2410van Статус автоуправления"
+    id: auto_status
+    lambda: |-
+      if (id(auto_control).state) {
+        return {"Включено"};
+      } else {
+        return {"Выключено"};
+      }
+    update_interval: never
+  - platform: template
+    name: "LD2410van Статус MQTT"
+    id: mqtt_status
+    lambda: |-
+      if (id(mqtt_client).is_connected()) {
+        return {"Подключен к MQTT"};
+      } else {
+        return {"Отключен от MQTT"};
+      }
+    update_interval: never
+  - platform: template
+    name: "LD2410van Диагностика устройства"
+    id: device_diagnostics
+    lambda: !lambda 'return "Выключатель: " + id(switch_address_var);'
+    update_interval: never
+  - platform: template
+    name: "LD2410van Wi-Fi Signal Status"
+    id: wifi_signal_status
+    lambda: !lambda 'return id(wifi_signal_strength).state ? "Signal strength: " + to_string(id(wifi_signal_strength).state) + " dB" : "Неизвестно";'    
+
 ld2410:
   id: ld2410_radar
 
-# MQTT конфигурация
 mqtt:
   id: mqtt_client
   broker: "192.168.0.118"
   port: 1883
   username: "user"
-  password: "xxxxx"
-  client_id: ld2410c_sensor
-  discovery: true
+  password: "xxxxxx"
+  client_id: ld2410van_sensor
+  discovery: false
   discovery_retain: false
-  topic_prefix: esphome/ld2410c
+  topic_prefix: esphome/ld2410van
   on_connect:
     then:
       - text_sensor.template.publish:
@@ -94,23 +102,12 @@ mqtt:
     then:
       - text_sensor.template.publish:
           id: mqtt_status
-          state: "Отключен"
+          state: "Отключен от MQTT"
       - logger.log: "MQTT отключен"
 
-# Логирование
-logger:
-  level: DEBUG
-  logs:
-    sensor: WARN
-    ld2410: INFO
-    api: DEBUG
-    text_sensor: DEBUG
-    mqtt: DEBUG
-
-# Home Assistant API
 api:
   encryption:
-    key: "KahQLtumxnvNxlSAXedfZm9cLfSdQ/Kg3v2XtEbqBdQ="
+    key: "k9d9LpAVktfcf340I14ZYdFV1fORzbCq4BtUY3BsP18="
   actions:
     - action: set_ld2410_bluetooth_password
       variables:
@@ -127,10 +124,18 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  manual_ip:
+    # Set this to the IP of the ESP
+    static_ip: 192.168.0.125
+    # Set this to the IP address of the router. Often ends with .1
+    gateway: 192.168.0.5
+    # The subnet of the network. 255.255.255.0 works for most home networks.
+    subnet: 255.255.255.0
   ap:
-    ssid: "Ld2410C Fallback Hotspot"
-    password: "Le5oOpFwWNjL"
+    ssid: "Ld2410Van Fallback Hotspot"
+    password: "xH2ZHIZCxzIN"
   power_save_mode: none
+  
 
 uart:
   tx_pin: GPIO16
@@ -139,15 +144,14 @@ uart:
   parity: NONE
   stop_bits: 1
 
-# Переключатели
 switch:
   - platform: ld2410
     engineering_mode:
-      name: "engineering mode"
+      name: "LD2410van Engineering Mode"
     bluetooth:
-      name: "control bluetooth"
+      name: "LD2410van Control Bluetooth"
   - platform: template
-    name: "Автоуправление Освещение"
+    name: "LD2410van Автоуправление Освещение"
     id: auto_control
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
@@ -162,57 +166,56 @@ switch:
           id: auto_status
           state: "Выключено"
       - logger.log: "Статус автоуправления изменен на: Выключено"
-  - platform: template
-    name: "Автоуправление Вентилятор"
-    id: auto_control_fan
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
-    icon: "mdi:fan-auto"
+      
 
 button:
   - platform: ld2410
     factory_reset:
-      name: "сброс к заводским"
+      name: "LD2410van Сброс к заводским"
     restart:
-      name: "перезагрузить"
+      name: "LD2410van Перезагрузить"
     query_params:
-      name: query params
+      name: "LD2410van Query Parameters"
   - platform: restart
-    name: "Перезагрузка для MQTT"
+    name: "LD2410van Перезагрузка для MQTT"
     id: restart_for_mqtt
     icon: "mdi:restart"
+  - platform: template
+    name: "LD2410van Query WiFi Signal"
+    id: query_wifi_signal
+    icon: "mdi:wifi"
+    on_press:
+      - text_sensor.template.publish:
+          id: wifi_signal_status
+          state: !lambda 'return id(wifi_signal_strength).state ? "Signal strength: " + to_string(id(wifi_signal_strength).state) + " dB" : "Неизвестно";'
+      - logger.log:
+          format: "Wi-Fi signal queried: %f dB"
+          args: ['id(wifi_signal_strength).state']
+
 
 number:
   - platform: ld2410
     timeout:
-      name: Таймаут радара
+      name: "LD2410van Таймаут радара"
     max_move_distance_gate:
-      name: Макс. расстояние движения
+      name: "LD2410van Макс. расстояние движения"
     max_still_distance_gate:
-      name: Макс. расстояние покоя
+      name: "LD2410van Макс. расстояние покоя"
   - platform: template
-    name: "Задержка выключения"
+    name: "LD2410van Задержка выключения"
     id: turn_off_delay
     optimistic: true
     min_value: 0
     max_value: 300
-    initial_value: 30
-    step: 5
+    initial_value: 15
+    step: 1
     unit_of_measurement: "сек"
-  - platform: template
-    name: "Задержка включения вентилятора"
-    id: fan_turn_on_delay
-    optimistic: true
-    min_value: 30
-    max_value: 600
-    initial_value: 180
-    step: 30
-    unit_of_measurement: "сек"
+
 
 binary_sensor:
   - platform: ld2410
     has_target:
-      name: Обнаружение цели
+      name: "LD2410van Обнаружение цели"
       id: radar_has_target
       filters:
         - delayed_off: 2s
@@ -223,115 +226,75 @@ binary_sensor:
                 and:
                   - switch.is_on: auto_control
                   - lambda: 'return !id(switch_address_var).empty();'
+                  - lambda: 'return id(mqtt_client).is_connected();'
               then:
                 - script.stop: delayed_turn_off
                 - mqtt.publish:
                     topic: !lambda 'return "zigbee2mqtt/" + id(switch_address_var) + "/set";'
                     payload: '{"state": "ON"}'
-                - logger.log: 
+                - logger.log:
                     format: "Включено освещение %s - обнаружено присутствие"
                     args: ['id(switch_address_var).c_str()']
-          - if:
-              condition:
-                and:
-                  - switch.is_on: auto_control_fan
-                  - lambda: 'return !id(fan_address_var).empty();'
-              then:
-                - script.stop: delayed_fan_turn_off
-                - script.execute: delayed_fan_turn_on
-                - logger.log: "Запущен таймер включения вентилятора"
       on_release:
         then:
+          - delay: 1s
           - if:
               condition:
                 and:
+                  - binary_sensor.is_off: radar_has_target
                   - switch.is_on: auto_control
                   - lambda: 'return !id(switch_address_var).empty();'
+                  - lambda: 'return id(mqtt_client).is_connected();'
               then:
                 - script.execute: delayed_turn_off
                 - logger.log: "Запущен таймер выключения освещения"
-          - if:
-              condition:
-                and:
-                  - switch.is_on: auto_control_fan
-                  - lambda: 'return !id(fan_address_var).empty();'
-              then:
-                - script.stop: delayed_fan_turn_on
-                - script.execute: delayed_fan_turn_off
-                - logger.log: "Остановлен таймер включения вентилятора, запущен таймер выключения"
     has_moving_target:
-      name: Движущаяся цель
+      name: "LD2410van Движущаяся цель"
     has_still_target:
-      name: Неподвижная цель
+      name: "LD2410van Неподвижная цель"
     out_pin_presence_status:
-      name: out pin presence status
+      name: "LD2410van Статус присутствия"
 
 sensor:
+  - platform: wifi_signal
+    name: "LD2410van Signal Strength"
+    id: wifi_signal_strength
+    unit_of_measurement: "dB"
   - platform: ld2410
     light:
-      name: light
+      name: "LD2410van Освещенность"
     moving_distance:
-      name: Расстояние движения
+      name: "LD2410van Расстояние движения"
       id: moving_distance
     still_distance:
-      name: Расстояние покоя
+      name: "LD2410van Расстояние покоя"
       id: still_distance
     moving_energy:
-      name: Энергия движения
+      name: "LD2410van Энергия движения"
     still_energy:
-      name: Энергия покоя
+      name: "LD2410van Энергия покоя"
     detection_distance:
-      name: Расстояние обнаружения
+      name: "LD2410van Расстояние обнаружения"
       id: radar_detection_distance
+
 
 script:
   - id: delayed_turn_off
     then:
-      - delay: !lambda "return id(turn_off_delay).state * 1000;"
+      - delay: !lambda 'return id(turn_off_delay).state * 1000;'
       - if:
           condition:
             and:
               - binary_sensor.is_off: radar_has_target
               - switch.is_on: auto_control
               - lambda: 'return !id(switch_address_var).empty();'
+              - lambda: 'return id(mqtt_client).is_connected();'
           then:
             - mqtt.publish:
                 topic: !lambda 'return "zigbee2mqtt/" + id(switch_address_var) + "/set";'
                 payload: '{"state": "OFF"}'
-            - logger.log: 
+            - logger.log:
                 format: "Выключено освещение %s - нет присутствия"
-                args: ['id(switch_address_var).c_str()']
-  - id: delayed_fan_turn_on
-    then:
-      - delay: !lambda "return id(fan_turn_on_delay).state * 1000;"
-      - if:
-          condition:
-            and:
-              - binary_sensor.is_on: radar_has_target
-              - switch.is_on: auto_control_fan
-              - lambda: 'return !id(fan_address_var).empty();'
-          then:
-            - mqtt.publish:
-                topic: !lambda 'return "zigbee2mqtt/" + id(fan_address_var) + "/set";'
-                payload: '{"state": "ON"}'
-            - logger.log: 
-                format: "Включен вентилятор %s - длительное присутствие"
-                args: ['id(fan_address_var).c_str()']
-  - id: delayed_fan_turn_off
-    then:
-      - delay: !lambda "return id(turn_off_delay).state * 1000;"
-      - if:
-          condition:
-            and:
-              - binary_sensor.is_off: radar_has_target
-              - switch.is_on: auto_control_fan
-              - lambda: 'return !id(fan_address_var).empty();'
-          then:
-            - mqtt.publish:
-                topic: !lambda 'return "zigbee2mqtt/" + id(fan_address_var) + "/set";'
-                payload: '{"state": "OFF"}'
-            - logger.log: 
-                format: "Выключен вентилятор %s - нет присутствия"
                 args: ['id(switch_address_var).c_str()']
 
 captive_portal:
