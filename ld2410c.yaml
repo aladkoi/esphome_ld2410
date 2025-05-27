@@ -10,7 +10,17 @@ esphome:
       - logger.log:
           format: "Диагностика при старте: Выключатель: %s"
           args: ['id(switch_address_var).c_str()']
-
+      - lambda: |-
+          bool success = id(mqtt_client).publish("esphome/ld2410van/status_test", "online");
+          if (success) {
+            id(mqtt_connected) = true;
+            id(mqtt_status).publish_state("Подключен к MQTT");
+            ESP_LOGI("main", "MQTT определён как подключён на старте.");
+          } else {
+            id(mqtt_connected) = false;
+            id(mqtt_status).publish_state("Отключен от MQTT");
+            ESP_LOGW("main", "MQTT определён как отключён на старте.");
+          }
 
 esp32:
   board: esp32dev
@@ -22,6 +32,10 @@ globals:
     type: std::string
     initial_value: '"Выключатель1/center"'
 
+  - id: mqtt_connected
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 logger:
   level: DEBUG
@@ -43,12 +57,20 @@ select:
     out_pin_level:
       name: out pin level
 
+# --- Wi-Fi Signal Diagnostic UI ---
 text_sensor:
+  - platform: template
+    name: "LD2410van Wi-Fi Signal Status"
+    id: wifi_signal_status
+    lambda: !lambda 'return id(wifi_signal_strength).state ? "Signal strength: " + to_string(id(wifi_signal_strength).state) + " dB" : "Неизвестно";'
+    update_interval: never
+
   - platform: ld2410
     version:
       name: "LD2410van Firmware Version"
     mac_address:
       name: "LD2410van MAC Address"
+
   - platform: template
     name: "LD2410van Статус автоуправления"
     id: auto_status
@@ -59,25 +81,49 @@ text_sensor:
         return {"Выключено"};
       }
     update_interval: never
+
   - platform: template
     name: "LD2410van Статус MQTT"
     id: mqtt_status
     lambda: |-
-      if (id(mqtt_client).is_connected()) {
+      if (id(mqtt_connected)) {
         return {"Подключен к MQTT"};
       } else {
         return {"Отключен от MQTT"};
       }
     update_interval: never
+
   - platform: template
     name: "LD2410van Диагностика устройства"
     id: device_diagnostics
     lambda: !lambda 'return "Выключатель: " + id(switch_address_var);'
     update_interval: never
+
+button:
   - platform: template
-    name: "LD2410van Wi-Fi Signal Status"
-    id: wifi_signal_status
-    lambda: !lambda 'return id(wifi_signal_strength).state ? "Signal strength: " + to_string(id(wifi_signal_strength).state) + " dB" : "Неизвестно";'    
+    name: "LD2410van Query WiFi Signal"
+    id: query_wifi_signal
+    icon: "mdi:wifi"
+    on_press:
+      - text_sensor.template.publish:
+          id: wifi_signal_status
+          state: !lambda 'return id(wifi_signal_strength).state ? "Signal strength: " + to_string(id(wifi_signal_strength).state) + " dB" : "Неизвестно";'
+      - logger.log:
+          format: "Wi-Fi signal queried: %f dB"
+          args: ['id(wifi_signal_strength).state']
+
+  - platform: ld2410
+    factory_reset:
+      name: "LD2410van Сброс к заводским"
+    restart:
+      name: "LD2410van Перезагрузить"
+    query_params:
+      name: "LD2410van Query Parameters"
+
+  - platform: restart
+    name: "LD2410van Перезагрузка для MQTT"
+    id: restart_for_mqtt
+    icon: "mdi:restart"
 
 ld2410:
   id: ld2410_radar
@@ -87,19 +133,25 @@ mqtt:
   broker: "192.168.0.118"
   port: 1883
   username: "user"
-  password: "xxxxxx"
+  password: "rfkbyf62"
   client_id: ld2410van_sensor
   discovery: false
   discovery_retain: false
   topic_prefix: esphome/ld2410van
   on_connect:
     then:
+      - globals.set:
+          id: mqtt_connected
+          value: 'true'
       - text_sensor.template.publish:
           id: mqtt_status
           state: "Подключен к MQTT"
       - logger.log: "MQTT подключен"
   on_disconnect:
     then:
+      - globals.set:
+          id: mqtt_connected
+          value: 'false'
       - text_sensor.template.publish:
           id: mqtt_status
           state: "Отключен от MQTT"
@@ -124,18 +176,14 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  manual_ip:
-    # Set this to the IP of the ESP
-    static_ip: 192.168.0.125
-    # Set this to the IP address of the router. Often ends with .1
-    gateway: 192.168.0.5
-    # The subnet of the network. 255.255.255.0 works for most home networks.
-    subnet: 255.255.255.0
   ap:
-    ssid: "Ld2410Van Fallback Hotspot"
-    password: "xH2ZHIZCxzIN"
+    ssid: "Ld2410C Fallback Hotspot"
+    password: "Le5oOpFwWNjL"
   power_save_mode: none
-  
+  manual_ip:
+    static_ip: 192.168.0.125
+    gateway: 192.168.0.5
+    subnet: 255.255.255.0
 
 uart:
   tx_pin: GPIO16
@@ -166,32 +214,6 @@ switch:
           id: auto_status
           state: "Выключено"
       - logger.log: "Статус автоуправления изменен на: Выключено"
-      
-
-button:
-  - platform: ld2410
-    factory_reset:
-      name: "LD2410van Сброс к заводским"
-    restart:
-      name: "LD2410van Перезагрузить"
-    query_params:
-      name: "LD2410van Query Parameters"
-  - platform: restart
-    name: "LD2410van Перезагрузка для MQTT"
-    id: restart_for_mqtt
-    icon: "mdi:restart"
-  - platform: template
-    name: "LD2410van Query WiFi Signal"
-    id: query_wifi_signal
-    icon: "mdi:wifi"
-    on_press:
-      - text_sensor.template.publish:
-          id: wifi_signal_status
-          state: !lambda 'return id(wifi_signal_strength).state ? "Signal strength: " + to_string(id(wifi_signal_strength).state) + " dB" : "Неизвестно";'
-      - logger.log:
-          format: "Wi-Fi signal queried: %f dB"
-          args: ['id(wifi_signal_strength).state']
-
 
 number:
   - platform: ld2410
@@ -211,7 +233,6 @@ number:
     step: 1
     unit_of_measurement: "сек"
 
-
 binary_sensor:
   - platform: ld2410
     has_target:
@@ -226,7 +247,7 @@ binary_sensor:
                 and:
                   - switch.is_on: auto_control
                   - lambda: 'return !id(switch_address_var).empty();'
-                  - lambda: 'return id(mqtt_client).is_connected();'
+                  - lambda: 'return id(mqtt_connected);'
               then:
                 - script.stop: delayed_turn_off
                 - mqtt.publish:
@@ -244,7 +265,7 @@ binary_sensor:
                   - binary_sensor.is_off: radar_has_target
                   - switch.is_on: auto_control
                   - lambda: 'return !id(switch_address_var).empty();'
-                  - lambda: 'return id(mqtt_client).is_connected();'
+                  - lambda: 'return id(mqtt_connected);'
               then:
                 - script.execute: delayed_turn_off
                 - logger.log: "Запущен таймер выключения освещения"
@@ -277,7 +298,6 @@ sensor:
       name: "LD2410van Расстояние обнаружения"
       id: radar_detection_distance
 
-
 script:
   - id: delayed_turn_off
     then:
@@ -288,7 +308,7 @@ script:
               - binary_sensor.is_off: radar_has_target
               - switch.is_on: auto_control
               - lambda: 'return !id(switch_address_var).empty();'
-              - lambda: 'return id(mqtt_client).is_connected();'
+              - lambda: 'return id(mqtt_connected);'
           then:
             - mqtt.publish:
                 topic: !lambda 'return "zigbee2mqtt/" + id(switch_address_var) + "/set";'
