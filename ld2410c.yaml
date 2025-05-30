@@ -133,7 +133,7 @@ mqtt:
   broker: "192.168.0.118"
   port: 1883
   username: "user"
-  password: "rfkbyf62"
+  password: "xxxxxx"
   client_id: ld2410van_sensor
   discovery: false
   discovery_retain: false
